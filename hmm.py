@@ -19,6 +19,7 @@ class HiddenMarkovModel:
 
         self.tag_given_tag_counts=dict()
         self.word_given_tag_counts=dict()
+        self.word_counts=dict()
 
         with open (train ,"r") as infile:
             for line in infile:
@@ -49,19 +50,31 @@ class HiddenMarkovModel:
                     else:
                         self.word_given_tag_counts[tag][word]=1
                         self.tag_given_tag_counts[lasttag][tag]=1
+                    if word not in self.word_counts:
+                        self.word_counts[word]=1
+                    self.word_counts[word]+=1
 
                     lasttag=tag
+                if lasttag not in self.tag_given_tag_counts:
+                    self.tag_given_tag_counts[lasttag] = Counter()
+                self.tag_given_tag_counts[lasttag]["</s>"]+=1
+
         # Compute the probability matrices A and B
         self.alpha = {}
         for tag1 in self.tag_given_tag_counts.keys():
-            norm = sum(self.tag_given_tag_counts[tag].values())
-            for tag2 in self.tag_given_tag_counts.keys():
+            norm = sum(self.tag_given_tag_counts[tag1].values())
+            for tag2 in self.tag_given_tag_counts[tag1].keys():
                 self.alpha[tag1+tag2] = self.tag_given_tag_counts[tag1][tag2] / norm
+
+        self.beta = {}
+        for tag in self.word_given_tag_counts.keys():
+            norm = sum(self.word_given_tag_counts[tag].values())
+            for word in self.word_given_tag_counts[tag].keys():
+                self.beta[word+tag] = self.word_given_tag_counts[tag][word] / norm
 
     def _forward(self):
         """Forward step of training the HMM."""
         
-
     def _backward(self):
         """Backward step of training the HMM."""
 
