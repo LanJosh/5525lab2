@@ -1,3 +1,4 @@
+from collections import defaultdict
 from collections import Counter
 
 import math
@@ -16,9 +17,11 @@ class HiddenMarkovModel:
             supervised: bool. Whether or not to use the tags in the part of speech
                 data.
         """
+        self.epsilon = 0.000001
         self.testpath=test
         self.trainpath=train
 
+        tag_counts = Counter()
         self.tag_given_tag_counts=dict()
         self.word_given_tag_counts=dict()
         self.word_counts=dict()
@@ -42,6 +45,11 @@ class HiddenMarkovModel:
                     word="/".join(parts)
                     #
                     # update counters
+                    if tag not in tag_counts:
+                        tag_counts[tag] = 1
+                    else:
+                        tag_counts[tag] += 1
+
                     if tag not in self.word_given_tag_counts:
                         self.word_given_tag_counts[tag]=Counter()
                     if lasttag not in self.tag_given_tag_counts:
@@ -61,20 +69,34 @@ class HiddenMarkovModel:
                     self.tag_given_tag_counts[lasttag] = Counter()
                 self.tag_given_tag_counts[lasttag]["</s>"]+=1
 
+        self.mode_tag = tag_counts.most_common(1)[0][0]
+
         # Compute the probability matrices A and B
-        self.alpha = {}
+        self.alpha = defaultdict(lambda: defaultdict(int))
         for tag1 in self.tag_given_tag_counts.keys():
             norm = sum(self.tag_given_tag_counts[tag1].values())
-            for tag2 in self.tag_given_tag_counts[tag1].keys():
-                self.alpha[tag2 + ' ' + tag1] = self.tag_given_tag_counts[tag1][tag2] / norm
+            for tag2, count in self.tag_given_tag_counts[tag1].items():
+                self.alpha[tag1][tag2] = count / norm
+
 
         self.vocabulary = set()
-        self.beta = {}
+        self.beta = defaultdict(lambda: defaultdict(int))
+        smooth_adj = self.epsilon * len(self.word_given_tag_counts[self.mode_tag])
+
         for tag in self.word_given_tag_counts.keys():
             norm = sum(self.word_given_tag_counts[tag].values())
-            for word in self.word_given_tag_counts[tag].keys():
+            if tag == self.mode_tag:
+                adj = smooth_adj
+                self.beta[self.mode_tag]['<UNK>'] = self.epsilon / (norm + adj)
+            else:
+                adj = 0
+
+            for word, count in self.word_given_tag_counts[tag].items():
                 self.vocabulary.add(word)
-                self.beta[word + ' ' + tag] = self.word_given_tag_counts[tag][word] / norm
+                self.beta[tag][word] = (count + self.epsilon) / (norm + adj)
+
+
+        self.tags = self.tag_given_tag_counts.keys()
 
     def _forward(self):
         """Forward step of training the HMM."""
@@ -83,66 +105,53 @@ class HiddenMarkovModel:
         """Backward step of training the HMM."""
 
     def viterbi(self, words):
-        tags = self.tag_given_tag_counts.keys()
-        vocabulary = self.vocabulary
-
         trellis = {}
-        for tag in tags:
-            if words[0] in vocabulary:
-                trellis[tag] = (self.get_log_prob(self.alpha, tag + ' <s>') + \
-                                self.get_log_prob(self.beta, words[0] + ' ' + tag), ['<s>'])
+        for tag in self.tags:
+            trellis[tag] = [self.get_log_prob(self.alpha, '<s>', tag), ['<s>', tag]]
+            if words[0] in self.vocabulary:
+                trellis[tag][0] += self.get_log_prob(self.beta, tag, words[0])
             else:
-                trellis[tag] = (self.get_log_prob(self.alpha, tag + ' <s>') + \
-                                self.get_log_prob(self.beta, '<UNK> ' + tag), ['<s>'])
+                trellis[tag] += self.get_log_prob(self.beta, tag, '<UNK>')
 
-        print(trellis)
-
+        new_trellis = {}
         for word in words[1:]:
-            for cur_tag in tags:
+            for cur_tag in self.tags:
                 cur_min_prob = float('inf')
                 cur_min_path = None
 
-                for prev_tag in tags:
-                    if word in vocabulary:
-                        prob = self.get_log_prob(self.alpha, cur_tag + ' ' + prev_tag) + \
-                               self.get_log_prob(self.beta, word + ' ' + tag) + \
-                               trellis[prev_tag][0]
+                for prev_tag in self.tags:
+                    prob = trellis[prev_tag][0] + self.get_log_prob(self.alpha, prev_tag, cur_tag)
+                    if word in self.vocabulary:
+                        prob += self.get_log_prob(self.beta, cur_tag, word)
                     else:
-                        prob = self.get_log_prob(self.alpha, cur_tag + ' ' + prev_tag) + \
-                               self.get_log_prob(self.beta, '<UNK> ' + tag) + \
-                                trellis[prev_tag][0]
+                        prob += self.get_log_prob(self.beta, cur_tag, '<UNK>')
 
                     if prob < cur_min_prob:
-                        print('here')
                         cur_min_prob = prob
-                        cur_min_path = trellis[prev_tag][1] + [tag]
+                        cur_min_path = trellis[prev_tag][1] + [cur_tag]
 
-                trellis[cur_tag] = (cur_min_prob, cur_min_path)
+                new_trellis[cur_tag] = [cur_min_prob, cur_min_path]
+
+            trellis = new_trellis
+            new_trellis = {}
 
         cur_min_prob = float('inf')
         cur_min_path = None
-        for tag in tags:
-            prob = self.get_log_prob(self.alpha, '</s> ' + tag) + trellis[tag][0]
+        for tag in self.tags:
+            prob = self.get_log_prob(self.alpha, tag, '</s>') + trellis[tag][0]
             if prob < cur_min_prob:
                 cur_min_prob = prob
                 cur_min_path = trellis[tag][1] + ['</s>']
 
-        trellis['</s>'] = (cur_min_prob, cur_min_path)
+        trellis['</s>'] = [cur_min_prob, cur_min_path]
 
-        min_prob = float('inf')
-        min_tag_seq = None
-        for k, v in trellis.items():
-            if v[1] < min_prob:
-                min_prob = v[0]
-                min_tag_seq = v[1]
-
-        return min_tag_seq
+        return trellis['</s>'][1]
         
-    def get_log_prob(self, dist, k):
-        try:
-            p = dist[k]
+    def get_log_prob(self, dist, given, k):
+        p = dist[given][k]
+        if p > 0:
             return -math.log(p)
-        except KeyError:
+        else:
             return float('inf')
 
     def train(self, iteration=10):
