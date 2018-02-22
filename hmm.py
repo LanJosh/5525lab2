@@ -24,7 +24,6 @@ class HiddenMarkovModel:
         tag_counts = Counter()
         self.tag_given_tag_counts=dict()
         self.word_given_tag_counts=dict()
-        self.word_counts=dict()
 
         with open (train ,"r") as infile:
             for line in infile:
@@ -60,9 +59,6 @@ class HiddenMarkovModel:
                     else:
                         self.word_given_tag_counts[tag][word]=1
                         self.tag_given_tag_counts[lasttag][tag]=1
-                    if word not in self.word_counts:
-                        self.word_counts[word]=1
-                    self.word_counts[word]+=1
 
                     lasttag=tag
                 if lasttag not in self.tag_given_tag_counts:
@@ -72,46 +68,96 @@ class HiddenMarkovModel:
         self.mode_tag = tag_counts.most_common(1)[0][0]
 
         # Compute the probability matrices A and B
-        self.alpha = defaultdict(lambda: defaultdict(int))
+        # Need to add transition to last tag in this?
+        self.trans_prob = defaultdict(lambda: defaultdict(int))
         for tag1 in self.tag_given_tag_counts.keys():
             norm = sum(self.tag_given_tag_counts[tag1].values())
             for tag2, count in self.tag_given_tag_counts[tag1].items():
-                self.alpha[tag1][tag2] = count / norm
+                self.trans_prob[tag1][tag2] = count / norm
 
 
         self.vocabulary = set()
-        self.beta = defaultdict(lambda: defaultdict(int))
+        self.obs_prob = defaultdict(lambda: defaultdict(int))
         smooth_adj = self.epsilon * len(self.word_given_tag_counts[self.mode_tag])
 
         for tag in self.word_given_tag_counts.keys():
             norm = sum(self.word_given_tag_counts[tag].values())
             if tag == self.mode_tag:
                 adj = smooth_adj
-                self.beta[self.mode_tag]['<UNK>'] = self.epsilon / (norm + adj)
+                self.obs_prob[self.mode_tag]['<UNK>'] = self.epsilon / (norm + adj)
             else:
                 adj = 0
 
             for word, count in self.word_given_tag_counts[tag].items():
                 self.vocabulary.add(word)
-                self.beta[tag][word] = (count + self.epsilon) / (norm + adj)
+                self.obs_prob[tag][word] = (count + self.epsilon) / (norm + adj)
 
 
         self.tags = self.tag_given_tag_counts.keys()
 
-    def _forward(self):
-        """Forward step of training the HMM."""
-        
-    def _backward(self):
-        """Backward step of training the HMM."""
+    def _forward(self, observations):
+        """Forward step of training the HMM.
+
+        Args:
+            observations: A list of strings.
+
+        Returns:
+            A list of dict representing the trellis of alpha values
+        """
+        states = self.tag_given_tag_counts.keys()
+        trellis = [{}] # Trellis to fill with alpha values
+        for state in states:
+            trellis[0][state] = (self.trans_prob["<s>"][state]
+                + self.obs_prob[state][observations[0]])
+
+        for t in range(1, len(observations)):
+            trellis.append({})
+            for state in states:
+                trellis[t][state] = sum(
+                    trellis[t-1][state] * self.trans_prob[prev_state][state]
+                    * self.obs_prob[state][observations[t]] for prev_state in states)
+
+        # Terminal step
+        trellis.append({})
+        q_f = "</s>"
+        trellis[t+1][q_f] = sum(
+            trellis[t-1][state]*self.trans_prob[prev_state][q_f]
+            for prev_state in states)
+        return trellis
+
+    def _backward(self, observations):
+        """Backward step of training the HMM.
+
+        Args:
+            observations: A list of strings.
+
+        Returns:
+            A list of dict representing the trellis of beta values
+        """
+        observations.append("</s>")
+        states = self.tag_given_tag_counts.keys()
+        trellis = [{}]
+
+        for state in states:
+            trellis[0][state] = self.trans_prob[state]["</s>"]
+
+        for t in range(len(observations)-1, 0, -1):
+            trellis.insert(0, {})
+            for state in states:
+                trellis[0][state] = sum(trellis[1][next_state]
+                    * self.trans_prob[state][next_state]
+                    * self.obs_prob[next_state][observations[t]]
+                    for next_state in states)
+        return trellis
 
     def viterbi(self, words):
         trellis = {}
         for tag in self.tags:
-            trellis[tag] = [self.get_log_prob(self.alpha, '<s>', tag), ['<s>', tag]]
+            trellis[tag] = [self.get_log_prob(self.trans_prob, '<s>', tag), ['<s>', tag]]
             if words[0] in self.vocabulary:
-                trellis[tag][0] += self.get_log_prob(self.beta, tag, words[0])
+                trellis[tag][0] += self.get_log_prob(self.obs_prob, tag, words[0])
             else:
-                trellis[tag] += self.get_log_prob(self.beta, tag, '<UNK>')
+                trellis[tag] += self.get_log_prob(self.obs_prob, tag, '<UNK>')
 
         new_trellis = {}
         for word in words[1:]:
@@ -120,11 +166,11 @@ class HiddenMarkovModel:
                 cur_min_path = None
 
                 for prev_tag in self.tags:
-                    prob = trellis[prev_tag][0] + self.get_log_prob(self.alpha, prev_tag, cur_tag)
+                    prob = trellis[prev_tag][0] + self.get_log_prob(self.trans_prob, prev_tag, cur_tag)
                     if word in self.vocabulary:
-                        prob += self.get_log_prob(self.beta, cur_tag, word)
+                        prob += self.get_log_prob(self.obs_prob, cur_tag, word)
                     else:
-                        prob += self.get_log_prob(self.beta, cur_tag, '<UNK>')
+                        prob += self.get_log_prob(self.obs_prob, cur_tag, '<UNK>')
 
                     if prob < cur_min_prob:
                         cur_min_prob = prob
@@ -138,7 +184,7 @@ class HiddenMarkovModel:
         cur_min_prob = float('inf')
         cur_min_path = None
         for tag in self.tags:
-            prob = self.get_log_prob(self.alpha, tag, '</s>') + trellis[tag][0]
+            prob = self.get_log_prob(self.trans_prob, tag, '</s>') + trellis[tag][0]
             if prob < cur_min_prob:
                 cur_min_prob = prob
                 cur_min_path = trellis[tag][1] + ['</s>']
@@ -154,6 +200,5 @@ class HiddenMarkovModel:
         else:
             return float('inf')
 
-    def train(self, iteration=10):
+    def train(self):
         """Utilize the forward backward algorithm to train the HMM."""
-
