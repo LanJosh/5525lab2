@@ -9,16 +9,14 @@ class HiddenMarkovModel:
     """
 
     def __init__(
-        self, train="./pos_train.txt", test="./pos_test.txt", supervised=True):
+        self, train="./pos_train.txt", supervised=True):
         """
         Args:
             train: str. The path to the file containing the training data.
-            test: str. The path to the file containing the testing data.
             supervised: bool. Whether or not to use the tags in the part of speech
                 data.
         """
         self.epsilon = 0.000001
-        self.testpath=test
         self.trainpath=train
 
         tag_counts = Counter()
@@ -192,11 +190,11 @@ class HiddenMarkovModel:
     def viterbi(self, words):
         trellis = {}
         for tag in self.tags:
-            trellis[tag] = [self.get_log_prob(self.trans_prob, '<s>', tag), ['<s>', tag]]
+            trellis[tag] = [self.get_log_prob(self.alpha, '<s>', tag), [tag]]
             if words[0] in self.vocabulary:
                 trellis[tag][0] += self.get_log_prob(self.obs_prob, tag, words[0])
             else:
-                trellis[tag] += self.get_log_prob(self.obs_prob, tag, '<UNK>')
+                trellis[tag][0] += self.get_log_prob(self.obs_prob, tag, '<UNK>')
 
         new_trellis = {}
         for word in words[1:]:
@@ -211,7 +209,7 @@ class HiddenMarkovModel:
                     else:
                         prob += self.get_log_prob(self.obs_prob, cur_tag, '<UNK>')
 
-                    if prob < cur_min_prob:
+                    if prob <= cur_min_prob:
                         cur_min_prob = prob
                         cur_min_path = trellis[prev_tag][1] + [cur_tag]
 
@@ -224,7 +222,7 @@ class HiddenMarkovModel:
         cur_min_path = None
         for tag in self.tags:
             prob = self.get_log_prob(self.trans_prob, tag, '</s>') + trellis[tag][0]
-            if prob < cur_min_prob:
+            if prob <= cur_min_prob:
                 cur_min_prob = prob
                 cur_min_path = trellis[tag][1]
 
@@ -261,3 +259,27 @@ class HiddenMarkovModel:
                 betas = self._backward(observation)
                 self._compute_new_params(alphas, betas, observation) 
 
+    def eval(self, testpath):
+        correct = 0
+        total = 0
+
+        with open(testpath, 'r') as testf:
+            for i, line in enumerate(testf):
+                line = line.strip()
+                terms = line.split()
+
+                tokens = []
+                tags = []
+                for term in terms:
+                    slash_idx = term.rindex('/')
+                    token, tag = term[:slash_idx], term[slash_idx + 1:]
+                    tokens.append(token)
+                    tags.append(tag)
+
+                predicted_tags = self.viterbi(tokens)
+                for predicted_tag, actual_tag in zip(predicted_tags, tags):
+                    total += 1
+                    if predicted_tag == actual_tag:
+                        correct += 1
+
+        return correct / total
