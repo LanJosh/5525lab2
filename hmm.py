@@ -68,7 +68,6 @@ class HiddenMarkovModel:
         self.mode_tag = tag_counts.most_common(1)[0][0]
 
         # Compute the probability matrices A and B
-        # Need to add transition to last tag in this?
         self.trans_prob = defaultdict(lambda: defaultdict(int))
         for tag1 in self.tag_given_tag_counts.keys():
             norm = sum(self.tag_given_tag_counts[tag1].values())
@@ -121,7 +120,7 @@ class HiddenMarkovModel:
         trellis.append({})
         q_f = "</s>"
         trellis[t+1][q_f] = sum(
-            trellis[t-1][state]*self.trans_prob[prev_state][q_f]
+            trellis[t][state]*self.trans_prob[prev_state][q_f]
             for prev_state in states)
         return trellis
 
@@ -148,7 +147,35 @@ class HiddenMarkovModel:
                     * self.trans_prob[state][next_state]
                     * self.obs_prob[next_state][observations[t]]
                     for next_state in states)
+
+        trellis.insert(0, {})
+        q_0 = "<s>"
+        trellis[0][q_0] = sum(trellis[1][next_state] * self.trans_prob[q_0][next_state]
+            * self.obs_prob[next_state][observations[t]] for next_state in states)
         return trellis
+
+    def _compute_new_params(self, alphas, betas):
+        """Compute new transition and emission probabilities using the
+        alpha and beta values. Should be used with supervised=False during
+        object initialization.
+
+        Args:
+            alpha:
+                list of dicts representing the alpha values. alpha[t]['state']
+                is the forward probability for the state at timestep t.
+            beta:
+                list of dicts representing the beta values. beta[t]['state']
+                is the backward probability for the state at timestep t
+        """
+
+        # E-step
+        chi = [defaultdict(lambda: defaultdict(float))]
+        for alpha, beta in zip(alphas, betas):
+            for state in self.tag_given_tag_counts.keys():
+
+
+
+        # M-step
 
     def viterbi(self, words):
         trellis = {}
