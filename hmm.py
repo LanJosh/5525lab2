@@ -68,7 +68,7 @@ class HiddenMarkovModel:
         self.mode_tag = tag_counts.most_common(1)[0][0]
 
         # Compute the probability matrices A and B
-        self.trans_prob = defaultdict(lambda: defaultdict(int))
+        self.trans_prob = defaultdict(lambda: defaultdict(float))
         for tag1 in self.tag_given_tag_counts.keys():
             norm = sum(self.tag_given_tag_counts[tag1].values())
             for tag2, count in self.tag_given_tag_counts[tag1].items():
@@ -76,7 +76,7 @@ class HiddenMarkovModel:
 
 
         self.vocabulary = set()
-        self.obs_prob = defaultdict(lambda: defaultdict(int))
+        self.obs_prob = defaultdict(lambda: defaultdict(float))
         smooth_adj = self.epsilon * len(self.word_given_tag_counts[self.mode_tag])
 
         for tag in self.word_given_tag_counts.keys():
@@ -107,20 +107,20 @@ class HiddenMarkovModel:
         trellis = [{}] # Trellis to fill with alpha values
         for state in states:
             trellis[0][state] = (self.trans_prob["<s>"][state]
-                + self.obs_prob[state][observations[0]])
+                * self.obs_prob[state][observations[0]])
 
         for t in range(1, len(observations)):
             trellis.append({})
             for state in states:
                 trellis[t][state] = sum(
-                    trellis[t-1][state] * self.trans_prob[prev_state][state]
+                    trellis[t-1][prev_state] * self.trans_prob[prev_state][state]
                     * self.obs_prob[state][observations[t]] for prev_state in states)
 
         # Terminal step
         trellis.append({})
         q_f = "</s>"
         trellis[t+1][q_f] = sum(
-            trellis[t][state]*self.trans_prob[prev_state][q_f]
+            trellis[t][prev_state]*self.trans_prob[prev_state][q_f]
             for prev_state in states)
         return trellis
 
@@ -133,7 +133,6 @@ class HiddenMarkovModel:
         Returns:
             A list of dict representing the trellis of beta values
         """
-        observations.append("</s>")
         states = self.tag_given_tag_counts.keys()
         trellis = [{}]
 
@@ -151,10 +150,10 @@ class HiddenMarkovModel:
         trellis.insert(0, {})
         q_0 = "<s>"
         trellis[0][q_0] = sum(trellis[1][next_state] * self.trans_prob[q_0][next_state]
-            * self.obs_prob[next_state][observations[t]] for next_state in states)
+            * self.obs_prob[next_state][observations[t-1]] for next_state in states)
         return trellis
 
-    def _compute_new_params(self, alphas, betas):
+    def _compute_new_params(self, alphas, betas, observations):
         """Compute new transition and emission probabilities using the
         alpha and beta values. Should be used with supervised=False during
         object initialization.
@@ -169,13 +168,26 @@ class HiddenMarkovModel:
         """
 
         # E-step
-        chi = [defaultdict(lambda: defaultdict(float))]
-        for alpha, beta in zip(alphas, betas):
+        chi = []
+        gamma = []
+        for t in range(len(alphas)-2):
+            chi.append(defaultdict(lambda: defaultdict(float))) 
+            gamma.append(defaultdict(float))
             for state in self.tag_given_tag_counts.keys():
-
-
+                for next_state in self.tag_given_tag_counts.keys():
+                    chi[t][state][next_state] = (alphas[t][state] * self.trans_prob[state][next_state]
+                        * self.obs_prob[next_state][observations[t+1]] * betas[t+2][next_state]) / alphas[-1]['</s>']
+                gamma[t][state] = alphas[t][state] * betas[t+1][state] / alphas[-1]['</s>'] 
 
         # M-step
+        for i in self.tag_given_tag_counts.keys():
+            for j in self.tag_given_tag_counts.keys():
+                self.trans_prob[i][j] = (sum(chi[t][i][j] for t in range(len(alphas)-2))
+                / sum(chi[t][i][k] for t in range(len(alphas)-2) for k in self.tag_given_tag_counts.keys()))
+
+            for v_k in observations:
+                self.obs_prob[i][v_k] = sum(gamma[t][i] for t in len(observations) if observations[t] == v_k)
+                self.obs_prob[i][v_k] /= sum(gamma[t][i] for t in len(observations))
 
     def viterbi(self, words):
         trellis = {}
@@ -214,11 +226,9 @@ class HiddenMarkovModel:
             prob = self.get_log_prob(self.trans_prob, tag, '</s>') + trellis[tag][0]
             if prob < cur_min_prob:
                 cur_min_prob = prob
-                cur_min_path = trellis[tag][1] + ['</s>']
+                cur_min_path = trellis[tag][1]
 
-        trellis['</s>'] = [cur_min_prob, cur_min_path]
-
-        return trellis['</s>'][1]
+        return cur_min_path
         
     def get_log_prob(self, dist, given, k):
         p = dist[given][k]
@@ -229,3 +239,25 @@ class HiddenMarkovModel:
 
     def train(self):
         """Utilize the forward backward algorithm to train the HMM."""
+
+        observation_sequences = []
+        with open (self.trainpath ,"r") as infile: 
+            for line in infile:
+                words = []
+                for wordtag in line.rstrip().split(" "):
+                    if wordtag == "":
+                        continue
+                    # note that you might have escaped slashes
+                    # 1\/2/CD means "1/2" "CD"
+                    # keep 1/2 as 1\/2 
+                    parts=wordtag.split("/")
+                    tag=parts.pop()
+                    word="/".join(parts)
+                    words.append(word)
+                observation_sequences.append(words)
+        for _ in range(10):
+            for observation in observation_sequences:
+                alphas = self._forward(observation)
+                betas = self._backward(observation)
+                self._compute_new_params(alphas, betas, observation) 
+
