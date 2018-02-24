@@ -5,7 +5,7 @@ import math
 
 
 class HiddenMarkovModel:
-    """HMM for the Eisner icecream data
+    """Hidden markov model for part of speech tagging on the Penn Treebank dataset
     """
 
     def __init__(
@@ -17,32 +17,82 @@ class HiddenMarkovModel:
             supervised: bool. Whether or not to use the tags in the part of speech
                 data.
         """
+        self.epsilon = 0.000001
+        self.testpath=test
+        self.trainpath=train
 
-        self.states = ['H', 'C']
-        self.observations = ['2','3','3','2','3','2','3','2','2','3','1','3','3','1','1','1','2','1','1','1','3','1','2','1',
-                             '1','1','2','3','3','2','3','2','2']
+        tag_counts = Counter()
+        self.tag_given_tag_counts=dict()
+        self.word_given_tag_counts=dict()
+
+        with open (train ,"r") as infile:
+            for line in infile:
+                #
+                # first tag is the start symbol
+                lasttag="<s>"
+                #
+                # split line into word/tag pairs
+                #
+                for wordtag in line.rstrip().split(" "):
+                    if wordtag == "":
+                        continue
+                    # note that you might have escaped slashes
+                    # 1\/2/CD means "1/2" "CD"
+                    # keep 1/2 as 1\/2 
+                    parts=wordtag.split("/")
+                    tag=parts.pop()
+                    word="/".join(parts)
+                    #
+                    # update counters
+                    if tag not in tag_counts:
+                        tag_counts[tag] = 1
+                    else:
+                        tag_counts[tag] += 1
+
+                    if tag not in self.word_given_tag_counts:
+                        self.word_given_tag_counts[tag]=Counter()
+                    if lasttag not in self.tag_given_tag_counts:
+                        self.tag_given_tag_counts[lasttag]=Counter()
+                    if supervised:
+                        self.word_given_tag_counts[tag][word]+=1
+                        self.tag_given_tag_counts[lasttag][tag]+=1
+                    else:
+                        self.word_given_tag_counts[tag][word]=1
+                        self.tag_given_tag_counts[lasttag][tag]=1
+
+                    lasttag=tag
+                if lasttag not in self.tag_given_tag_counts:
+                    self.tag_given_tag_counts[lasttag] = Counter()
+                self.tag_given_tag_counts[lasttag]["</s>"]+=1
+
+        self.mode_tag = tag_counts.most_common(1)[0][0]
 
         # Compute the probability matrices A and B
-        self.trans_prob = defaultdict(lambda: defaultdict(float)) # A
-        self.trans_prob['C']['C'] = .8
-        self.trans_prob['H']['C'] = .1
-        self.trans_prob['<s>']['C'] = .5
-        self.trans_prob['C']['H'] = .1
-        self.trans_prob['H']['H'] = .8
-        self.trans_prob['<s>']['H'] = .5
-        self.trans_prob['C']['</s>'] = .1
-        self.trans_prob['H']['</s>'] = .1
-        self.trans_prob['<s>']['</s>'] = .0
-
-        self.obs_prob = defaultdict(lambda: defaultdict(float)) # B
-        self.obs_prob['C']['1'] = .7
-        self.obs_prob['H']['1'] = .1
-        self.obs_prob['C']['2'] = .2
-        self.obs_prob['H']['2'] = .2
-        self.obs_prob['C']['3'] = .1
-        self.obs_prob['H']['3'] = .7
+        self.trans_prob = defaultdict(lambda: defaultdict(float))
+        for tag1 in self.tag_given_tag_counts.keys():
+            norm = sum(self.tag_given_tag_counts[tag1].values())
+            for tag2, count in self.tag_given_tag_counts[tag1].items():
+                self.trans_prob[tag1][tag2] = count / norm
 
 
+        self.vocabulary = set()
+        self.obs_prob = defaultdict(lambda: defaultdict(float))
+        smooth_adj = self.epsilon * len(self.word_given_tag_counts[self.mode_tag])
+
+        for tag in self.word_given_tag_counts.keys():
+            norm = sum(self.word_given_tag_counts[tag].values())
+            if tag == self.mode_tag:
+                adj = smooth_adj
+                self.obs_prob[self.mode_tag]['<UNK>'] = self.epsilon / (norm + adj)
+            else:
+                adj = 0
+
+            for word, count in self.word_given_tag_counts[tag].items():
+                self.vocabulary.add(word)
+                self.obs_prob[tag][word] = (count + self.epsilon) / (norm + adj)
+
+
+        self.tags = self.tag_given_tag_counts.keys()
 
     def _forward(self, observations):
         """Forward step of training the HMM.
@@ -53,8 +103,7 @@ class HiddenMarkovModel:
         Returns:
             A list of dict representing the trellis of alpha values
         """
-        observations = self.observations
-        states = self.states
+        states = self.tag_given_tag_counts.keys()
         trellis = [{}] # Trellis to fill with alpha values
         for state in states:
             trellis[0][state] = (self.trans_prob["<s>"][state]
@@ -84,8 +133,7 @@ class HiddenMarkovModel:
         Returns:
             A list of dict representing the trellis of beta values
         """
-        states = self.states
-        observations = self.observations
+        states = self.tag_given_tag_counts.keys()
         trellis = [{}]
 
         for state in states:
@@ -119,32 +167,27 @@ class HiddenMarkovModel:
                 is the backward probability for the state at timestep t
         """
 
-        # E-step      
+        # E-step
         chi = []
         gamma = []
         for t in range(len(alphas)-2):
             chi.append(defaultdict(lambda: defaultdict(float))) 
             gamma.append(defaultdict(float))
-            for state in self.states:
-                for next_state in self.states:
+            for state in self.tag_given_tag_counts.keys():
+                for next_state in self.tag_given_tag_counts.keys():
                     chi[t][state][next_state] = (alphas[t][state] * self.trans_prob[state][next_state]
                         * self.obs_prob[next_state][observations[t+1]] * betas[t+2][next_state]) / alphas[-1]['</s>']
                 gamma[t][state] = alphas[t][state] * betas[t+1][state] / alphas[-1]['</s>'] 
-        
-        T=len(observations)-1
-        gamma.append(defaultdict(float))
-        for state in self.states:
-            gamma[T][state]=alphas[T][state] * betas[T+1][state] / alphas[-1]['</s>']
-        
+
         # M-step
-        for i in self.states:
-            for j in self.states:
+        for i in self.tag_given_tag_counts.keys():
+            for j in self.tag_given_tag_counts.keys():
                 self.trans_prob[i][j] = (sum(chi[t][i][j] for t in range(len(alphas)-2))
-                / sum(chi[t][i][k] for t in range(len(alphas)-2) for k in self.states))
+                / sum(chi[t][i][k] for t in range(len(alphas)-2) for k in self.tag_given_tag_counts.keys()))
 
             for v_k in observations:
-                self.obs_prob[i][v_k] = sum([gamma[t][i] for t in range(len(observations)) if observations[t] == v_k])
-                self.obs_prob[i][v_k] /= sum(gamma[t][i] for t in range(len(observations)))
+                self.obs_prob[i][v_k] = sum(gamma[t][i] for t in len(observations) if observations[t] == v_k)
+                self.obs_prob[i][v_k] /= sum(gamma[t][i] for t in len(observations))
 
     def viterbi(self, words):
         trellis = {}
@@ -197,16 +240,24 @@ class HiddenMarkovModel:
     def train(self):
         """Utilize the forward backward algorithm to train the HMM."""
 
-        for x in range(10):
-            alphas = self._forward(self.observations)
-            print("Alpha values at iteration {}".format(x))
-            print(alphas)
-            betas = self._backward(self.observations)
-            print("Beta values at iteration {}".format(x))
-            print(betas)
-            self._compute_new_params(alphas, betas, self.observations) 
-            print("A values at iteration {}".format(x))
-            print(self.trans_prob) 
-            print("B values at iteration {}".format(x))
-            print(self.obs_prob)
+        observation_sequences = []
+        with open (self.trainpath ,"r") as infile: 
+            for line in infile:
+                words = []
+                for wordtag in line.rstrip().split(" "):
+                    if wordtag == "":
+                        continue
+                    # note that you might have escaped slashes
+                    # 1\/2/CD means "1/2" "CD"
+                    # keep 1/2 as 1\/2 
+                    parts=wordtag.split("/")
+                    tag=parts.pop()
+                    word="/".join(parts)
+                    words.append(word)
+                observation_sequences.append(words)
+        for _ in range(10):
+            for observation in observation_sequences:
+                alphas = self._forward(observation)
+                betas = self._backward(observation)
+                self._compute_new_params(alphas, betas, observation) 
 
