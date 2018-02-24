@@ -2,6 +2,7 @@ from collections import defaultdict
 from collections import Counter
 
 import math
+import sys
 
 
 class HiddenMarkovModel:
@@ -18,8 +19,8 @@ class HiddenMarkovModel:
                 data.
         """
 
-        self.states = set(['H', 'C'])
-        self.observations = [2,3,3,2,3,2,3,2,2,3,1,3,3,1,1,1,2,1,1,1,3,1,2,1,1,1,2,3,3,2,3,2,2]
+        self.states = set(['C', 'H'])
+        self.observations = list(map(str, [2,3,3,2,3,2,3,2,2,3,1,3,3,1,1,1,2,1,1,1,3,1,2,1,1,1,2,3,3,2,3,2,2]))
 
         # Compute the probability matrices A and B
         self.trans_prob = defaultdict(lambda: defaultdict(float)) # A
@@ -40,8 +41,6 @@ class HiddenMarkovModel:
         self.obs_prob['H']['2'] = .2
         self.obs_prob['C']['3'] = .1
         self.obs_prob['H']['3'] = .7
-
-
 
     def _forward(self, observations):
         """Forward step of training the HMM.
@@ -137,8 +136,8 @@ class HiddenMarkovModel:
                 / sum(chi[t][i][k] for t in range(len(alphas)-2) for k in self.states))
 
             for v_k in observations:
-                self.obs_prob[i][v_k] = sum(gamma[t][i] for t in len(observations) if observations[t] == v_k)
-                self.obs_prob[i][v_k] /= sum(gamma[t][i] for t in len(observations))
+                self.obs_prob[i][v_k] = sum(gamma[t][i] for t in range(len(observations)) if observations[t] == v_k)
+                self.obs_prob[i][v_k] /= sum(gamma[t][i] for t in range(len(observations)))
 
     def viterbi(self, words):
         trellis = {}
@@ -193,14 +192,6 @@ class HiddenMarkovModel:
 
         for x in range(10):
             alphas = self._forward(self.observations)
-            print("Alpha values at iteration {}".format(x))
-            print(alphas)
             betas = self._backward(self.observations)
-            print("Beta values at iteration {}".format(x))
-            print(betas)
             self._compute_new_params(alphas, betas, self.observations) 
-            print("A values at iteration {}".format(x))
-            print(self.trans_prob) 
-            print("B values at iteration {}".format(x))
-            print(self.obs_prob)
 
