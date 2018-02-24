@@ -65,12 +65,6 @@ class HiddenMarkovModel:
                     trellis[t-1][prev_state] * self.trans_prob[prev_state][state]
                     * self.obs_prob[state][observations[t]] for prev_state in states)
 
-        # Terminal step
-        trellis.append({})
-        q_f = "</s>"
-        trellis[t+1][q_f] = sum(
-            trellis[t][prev_state]*self.trans_prob[prev_state][q_f]
-            for prev_state in states)
         return trellis
 
     def _backward(self, observations):
@@ -97,10 +91,6 @@ class HiddenMarkovModel:
                     * self.obs_prob[next_state][observations[t]]
                     for next_state in states)
 
-        trellis.insert(0, {})
-        q_0 = "<s>"
-        trellis[0][q_0] = sum(trellis[1][next_state] * self.trans_prob[q_0][next_state]
-            * self.obs_prob[next_state][observations[t-1]] for next_state in states)
         return trellis
 
     def _compute_new_params(self, alphas, betas, observations):
@@ -120,24 +110,31 @@ class HiddenMarkovModel:
         # E-step
         chi = []
         gamma = []
-        for t in range(len(alphas)-2):
-            chi.append(defaultdict(lambda: defaultdict(float))) 
+        for t in range(1,len(observations),1): 
+            chi.append(defaultdict(lambda: defaultdict(float)))
             gamma.append(defaultdict(float))
+            prob_data = sum(alphas[t][sstate] * betas[t][sstate] for sstate in self.states) # Total prob of data
             for state in self.states:
-                for next_state in self.states:
-                    chi[t][state][next_state] = (alphas[t][state] * self.trans_prob[state][next_state]
-                        * self.obs_prob[next_state][observations[t+1]] * betas[t+2][next_state]) / alphas[-1]['</s>']
-                gamma[t][state] = alphas[t][state] * betas[t+1][state] / alphas[-1]['</s>'] 
+                for next_state in self.states: 
+                    # Using chi defined in the Eisner sheet
+                    # being in state `next_state` at time t having transitioned from state `state` at 
+                    # t-1. Jurafsky & Martin defined it as being in state `state` at time t and 
+                    # going to state `next_state` at t+1. The denominator is also different in definition
+                    # but both represent the probability of the observation sequence.
+                    chi[t-1][state][next_state] = (alphas[t-1][state] * self.trans_prob[state][next_state]
+                        * self.obs_prob[next_state][observations[t]] * betas[t][next_state] / prob_data)
+                gamma[t-1][state] = alphas[t][state] * betas[t][state] / prob_data 
+
 
         # M-step
         for i in self.states:
             for j in self.states:
-                self.trans_prob[i][j] = (sum(chi[t][i][j] for t in range(len(alphas)-2))
-                / sum(chi[t][i][k] for t in range(len(alphas)-2) for k in self.states))
+                self.trans_prob[i][j] = (sum(chi[t][i][j] for t in range(len(observations)-1))
+                / sum(chi[t][i][k] for t in range(len(observations)-1) for k in self.states)) 
 
             for v_k in observations:
-                self.obs_prob[i][v_k] = sum(gamma[t][i] for t in range(len(observations)) if observations[t] == v_k)
-                self.obs_prob[i][v_k] /= sum(gamma[t][i] for t in range(len(observations)))
+                self.obs_prob[i][v_k] = sum(gamma[t][i] for t in range(len(observations)-1) if observations[t] == v_k)
+                self.obs_prob[i][v_k] /= sum(gamma[t][i] for t in range(len(observations)-1))
 
     def viterbi(self, words):
         trellis = {}
@@ -194,4 +191,11 @@ class HiddenMarkovModel:
             alphas = self._forward(self.observations)
             betas = self._backward(self.observations)
             self._compute_new_params(alphas, betas, self.observations) 
+
+        for state in self.states:
+            for state2 in self.states:
+                print('P({}|{}) = {}'.format(state2, state, self.trans_prob[state][state2]))
+        for observation in ['1','2','3']:
+            for state in self.states:
+                print('P({}|{}) = {}'.format(observation, state, self.obs_prob[state][observation]))
 
