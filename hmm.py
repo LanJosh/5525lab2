@@ -76,7 +76,6 @@ class HiddenMarkovModel:
         Returns:
             A list of dict representing the trellis of alpha values
         """
-        observations = self.observations
         states = self.states
         trellis = [{}] # Trellis to fill with alpha values
         for state in states:
@@ -105,7 +104,6 @@ class HiddenMarkovModel:
             A list of dict representing the trellis of beta values
         """
         states = self.states
-        observations = self.observations
         trellis = [{}]
 
         for state in states:
@@ -179,7 +177,7 @@ class HiddenMarkovModel:
     def viterbi(self, words):
         trellis = {}
         for tag in self.states:
-            trellis[tag] = [self.get_log_prob(self.alpha, '<s>', tag), [tag]]
+            trellis[tag] = [self.get_log_prob(self.trans_prob, '<s>', tag), [tag]]
             if words[0] in self.vocabulary:
                 trellis[tag][0] += self.get_log_prob(self.obs_prob, tag, words[0])
             else:
@@ -227,10 +225,20 @@ class HiddenMarkovModel:
     def train(self):
         """Utilize the forward backward algorithm to train the HMM."""
 
-        for x in range(10):
-            alphas = self._forward(self.observations)
-            betas = self._backward(self.observations)
-            self._compute_new_params(alphas, betas, self.observations)
+        with open(self.trainpath, 'r') as infile:
+            for line in infile:
+                observations = []
+                for wordtag in line.rstrip().split(" "):
+                    if wordtag == '':
+                        continue
+
+                    s_idx = wordtag.rindex('/')
+                    word = wordtag[:s_idx]
+                    observations.append(word)
+
+                alphas = self._forward(observations)
+                betas = self._backward(observations)
+                self._compute_new_params(alphas, betas, observations)
 
         for state in self.states:
             for state2 in self.states:
