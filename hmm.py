@@ -20,6 +20,7 @@ class HiddenMarkovModel:
         self.trainpath=train
 
         tag_counts = Counter()
+        self.states = set()
         self.tag_given_tag_counts=dict()
         self.word_given_tag_counts=dict()
 
@@ -36,10 +37,12 @@ class HiddenMarkovModel:
                         continue
                     # note that you might have escaped slashes
                     # 1\/2/CD means "1/2" "CD"
-                    # keep 1/2 as 1\/2 
+                    # keep 1/2 as 1\/2
                     parts=wordtag.split("/")
                     tag=parts.pop()
                     word="/".join(parts)
+                    self.states.add(tag)
+
                     #
                     # update counters
                     if tag not in tag_counts:
@@ -175,7 +178,7 @@ class HiddenMarkovModel:
 
     def viterbi(self, words):
         trellis = {}
-        for tag in self.tags:
+        for tag in self.states:
             trellis[tag] = [self.get_log_prob(self.alpha, '<s>', tag), [tag]]
             if words[0] in self.vocabulary:
                 trellis[tag][0] += self.get_log_prob(self.obs_prob, tag, words[0])
@@ -184,11 +187,11 @@ class HiddenMarkovModel:
 
         new_trellis = {}
         for word in words[1:]:
-            for cur_tag in self.tags:
+            for cur_tag in self.states:
                 cur_min_prob = float('inf')
                 cur_min_path = None
 
-                for prev_tag in self.tags:
+                for prev_tag in self.states:
                     prob = trellis[prev_tag][0] + self.get_log_prob(self.trans_prob, prev_tag, cur_tag)
                     if word in self.vocabulary:
                         prob += self.get_log_prob(self.obs_prob, cur_tag, word)
@@ -206,7 +209,7 @@ class HiddenMarkovModel:
 
         cur_min_prob = float('inf')
         cur_min_path = None
-        for tag in self.tags:
+        for tag in self.states:
             prob = self.get_log_prob(self.trans_prob, tag, '</s>') + trellis[tag][0]
             if prob <= cur_min_prob:
                 cur_min_prob = prob
