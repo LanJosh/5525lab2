@@ -23,6 +23,7 @@ class HiddenMarkovModel:
         self.states = set()
         self.tag_given_tag_counts=dict()
         self.word_given_tag_counts=dict()
+        self.vocabulary=set()
 
         with open (train ,"r") as infile:
             for line in infile:
@@ -42,6 +43,7 @@ class HiddenMarkovModel:
                     tag=parts.pop()
                     word="/".join(parts)
                     self.states.add(tag)
+                    self.vocabulary.add(word)
 
                     #
                     # update counters
@@ -164,11 +166,6 @@ class HiddenMarkovModel:
             chi.append(defaultdict(lambda: defaultdict(float)))
             for state in self.states:
                 for next_state in self.states:
-                    # Using chi defined in the Eisner sheet
-                    # being in state `next_state` at time t having transitioned from state `state` a
-                    # t-1. Jurafsky & Martin defined it as being in state `state` at time t and
-                    # going to state `next_state` at t+1. The denominator is also different in definition
-                    # but both represent the probability of the observation sequence.
                     total_prob = alphas[-1]['</s>']
                     if total_prob == 0:
                         total_prob = self.epsilon
