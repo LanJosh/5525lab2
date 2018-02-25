@@ -66,6 +66,19 @@ class HiddenMarkovModel:
                     self.tag_given_tag_counts[lasttag] = Counter()
                 self.tag_given_tag_counts[lasttag]["</s>"]+=1
 
+        # Compute the probability matrices A and B
+        self.trans_prob = defaultdict(lambda: defaultdict(float))
+        for tag1 in self.tag_given_tag_counts.keys():
+            norm = sum(self.tag_given_tag_counts[tag1].values())
+            for tag2 in self.tag_given_tag_counts[tag1].keys():
+                self.trans_prob[tag1][tag2] = self.tag_given_tag_counts[tag1][tag2] / norm
+
+        self.obs_prob = defaultdict(lambda: defaultdict(float))
+        for tag in self.word_given_tag_counts.keys():
+            norm = sum(self.word_given_tag_counts[tag].values())
+            for word in self.word_given_tag_counts[tag].keys():
+                self.obs_prob[tag][word] = self.word_given_tag_counts[tag][word] / norm
+
 
     def _forward(self, observations):
         """Forward step of training the HMM.
