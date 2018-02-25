@@ -79,6 +79,9 @@ class HiddenMarkovModel:
             for word in self.word_given_tag_counts[tag].keys():
                 self.obs_prob[tag][word] = self.word_given_tag_counts[tag][word] / norm
 
+        mode_tag = tag_counts.most_common(1)[0][0]
+        self.obs_prob[mode_tag]['<UNK>'] = self.epsilon
+
 
     def _forward(self, observations):
         """Forward step of training the HMM.
@@ -150,6 +153,9 @@ class HiddenMarkovModel:
                 list of dicts representing the beta values. beta[t]['state']
                 is the backward probability for the state at timestep t
         """
+        total_sent_prob = alphas[-1]['</s>']
+        if total_sent_prob == 0:
+            total_sent_prob = self.epsilon
 
         # E-step
         chi = []
@@ -163,29 +169,44 @@ class HiddenMarkovModel:
                     # t-1. Jurafsky & Martin defined it as being in state `state` at time t and
                     # going to state `next_state` at t+1. The denominator is also different in definition
                     # but both represent the probability of the observation sequence.
+                    total_prob = alphas[-1]['</s>']
+                    if total_prob == 0:
+                        total_prob = self.epsilon
+
                     chi[t-1][state][next_state] = (alphas[t-1][state] * self.trans_prob[state][next_state]
-                        * self.obs_prob[next_state][observations[t]] * betas[t + 1][next_state] / alphas[-1]['</s>'])
+                        * self.obs_prob[next_state][observations[t]] * betas[t + 1][next_state] / total_sent_prob)
 
         gamma = []
         for t in range(len(observations)):
             gamma.append(defaultdict(float))
             for state in self.states:
-                gamma[t][state] = alphas[t][state] * betas[t + 1][state] / alphas[-1]['</s>']
+                gamma[t][state] = alphas[t][state] * betas[t + 1][state] / total_sent_prob
 
         # M-step
         for i in self.states:
             for j in self.states:
                 total_prob = sum(chi[t][i][k] for t in range(len(observations)-1) for k in self.states) + \
-                             alphas[-2][i] * self.trans_prob[i]['</s>'] / alphas[-1]['</s>']
+                             alphas[-2][i] * self.trans_prob[i]['</s>'] / total_sent_prob
+                if total_prob == 0:
+                    total_prob = self.epsilon
+
                 self.trans_prob[i][j] = (sum(chi[t][i][j] for t in range(len(observations)-1))) / total_prob
 
             for v_k in observations:
+                total_prob = sum(gamma[t][i] for t in range(len(observations)))
+                if total_prob == 0:
+                    total_prob = self.epsilon
+
                 self.obs_prob[i][v_k] = sum(gamma[t][i] for t in range(len(observations)) if observations[t] == v_k)
-                self.obs_prob[i][v_k] /= sum(gamma[t][i] for t in range(len(observations)))
+                self.obs_prob[i][v_k] /= total_prob
 
         for i in self.states:
+            total_prob = sum(gamma[t][i] for t in range(len(observations)))
+            if total_prob == 0:
+                total_prob = self.epsilon
+
             self.trans_prob['<s>'][i] = gamma[0][i]
-            self.trans_prob[i]['</s>'] = gamma[-1][i] / sum(gamma[t][i] for t in range(len(observations)))
+            self.trans_prob[i]['</s>'] = gamma[-1][i] / total_prob
 
     def viterbi(self, words):
         trellis = {}
@@ -249,6 +270,7 @@ class HiddenMarkovModel:
                     word = wordtag[:s_idx]
                     observations.append(word)
 
+                print(observations)
                 alphas = self._forward(observations)
                 betas = self._backward(observations)
                 self._compute_new_params(alphas, betas, observations)
