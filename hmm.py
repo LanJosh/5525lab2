@@ -9,11 +9,7 @@ class HiddenMarkovModel:
     """
 
     def __init__(
-<<<<<<< HEAD
-        self, train="./pos_train.txt", supervised=True):
-=======
         self, train="./pos_train.txt", supervised=True,wordCase='regular'):
->>>>>>> origin/master
         """
         Args:
             train: str. The path to the file containing the training data.
@@ -25,10 +21,6 @@ class HiddenMarkovModel:
 
         tag_counts = Counter()
         self.states = set()
-<<<<<<< HEAD
-=======
-        self.vocabulary = set()
->>>>>>> origin/master
         self.tag_given_tag_counts=dict()
         self.word_given_tag_counts=dict()
         self.vocabulary=set()
@@ -49,11 +41,6 @@ class HiddenMarkovModel:
                     # keep 1/2 as 1\/2
                     parts=wordtag.split("/")
                     tag=parts.pop()
-<<<<<<< HEAD
-                    word="/".join(parts)
-                    self.states.add(tag)
-                    self.vocabulary.add(word)
-=======
                     
                     if wordCase=='regular':
                         word="/".join(parts)
@@ -61,7 +48,6 @@ class HiddenMarkovModel:
                         word="/".join([l.lower() for l in parts])
                         
                     self.states.add(tag)
->>>>>>> origin/master
 
                     #
                     # update counters
@@ -97,19 +83,11 @@ class HiddenMarkovModel:
         for tag in self.word_given_tag_counts.keys():
             norm = sum(self.word_given_tag_counts[tag].values())
             for word in self.word_given_tag_counts[tag].keys():
-<<<<<<< HEAD
-                self.obs_prob[tag][word] = self.word_given_tag_counts[tag][word] / norm
-
-        mode_tag = tag_counts.most_common(1)[0][0]
-        self.obs_prob[mode_tag]['<UNK>'] = self.epsilon
-
-=======
                 self.vocabulary.add(word)
                 self.obs_prob[tag][word] = self.word_given_tag_counts[tag][word] / norm
         
         mode_tag = tag_counts.most_common(1)[0][0]
         self.obs_prob[mode_tag]['<UNK>'] = self.epsilon
->>>>>>> origin/master
 
     def _forward(self, observations):
         """Forward step of training the HMM.
