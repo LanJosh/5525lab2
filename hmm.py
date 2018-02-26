@@ -180,30 +180,34 @@ class HiddenMarkovModel:
                 gamma[t][state] = alphas[t][state] * betas[t + 1][state] / total_sent_prob
 
         # M-step
+        total_state_count = {}
         for i in self.states:
-            for j in self.states:
-                total_prob = sum(chi[t][i][k] for t in range(len(observations)-1) for k in self.states) + \
-                             alphas[-2][i] * self.trans_prob[i]['</s>'] / total_sent_prob
-                if total_prob == 0:
-                    total_prob = self.epsilon
+            state_count = sum(gamma[t][i] for t in range(len(observations)))
+            if state_count == 0:
+                state_count = self.epsilon
+            total_state_count[i] = state_count
 
-                self.trans_prob[i][j] = (sum(chi[t][i][j] for t in range(len(observations)-1))) / total_prob
+        for i in self.states:
+            chi_per_state = defaultdict(lambda: defaultdict(float))
+            total_chi = alphas[-2][i] * self.trans_prob[i]['</s>'] / total_sent_prob
+
+            for k in self.states:
+                for t in range(len(observations) - 1):
+                    chi_per_state[i][k] += chi[t][i][k]
+                    total_chi += chi[t][i][k]
+            if total_chi == 0:
+                total_chi = self.epsilon
+
+            for j in self.states:
+                self.trans_prob[i][j] = chi_per_state[i][j] / total_chi
 
             for v_k in observations:
-                total_prob = sum(gamma[t][i] for t in range(len(observations)))
-                if total_prob == 0:
-                    total_prob = self.epsilon
-
                 self.obs_prob[i][v_k] = sum(gamma[t][i] for t in range(len(observations)) if observations[t] == v_k)
-                self.obs_prob[i][v_k] /= total_prob
+                self.obs_prob[i][v_k] /= total_state_count[i]
 
         for i in self.states:
-            total_prob = sum(gamma[t][i] for t in range(len(observations)))
-            if total_prob == 0:
-                total_prob = self.epsilon
-
             self.trans_prob['<s>'][i] = gamma[0][i]
-            self.trans_prob[i]['</s>'] = gamma[-1][i] / total_prob
+            self.trans_prob[i]['</s>'] = gamma[-1][i] / total_state_count[i]
 
     def viterbi(self, words):
         trellis = {}
@@ -267,7 +271,6 @@ class HiddenMarkovModel:
                     word = wordtag[:s_idx]
                     observations.append(word)
 
-                print(observations)
                 alphas = self._forward(observations)
                 betas = self._backward(observations)
                 self._compute_new_params(alphas, betas, observations)
