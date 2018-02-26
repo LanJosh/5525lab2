@@ -215,13 +215,23 @@ class HiddenMarkovModel:
 
     def train(self):
         """Utilize the forward backward algorithm to train the HMM."""
-        for x in range(3):
+        for x in range(13):
             print("Iteration {}".format(x))
+            for state in self.states:
+                print('P({}|{}) = {}'.format(state, '<s>', self.trans_prob['<s>'][state]))
+                print('P({}|{}) = {}'.format('</s>', state, self.trans_prob[state]['</s>']))
+            for state in self.states:
+                for state2 in self.states:
+                    print('P({}|{}) = {}'.format(state, state2, self.trans_prob[state2][state]))
+            for observation in ['1','2','3']:
+                for state in self.states:
+                    print('P({}|{}) = {}'.format(observation, state, self.obs_prob[state][observation]))
 
             alphas = self._forward(self.observations)
             betas = self._backward(self.observations)
             self._expectation(alphas, betas, self.observations) 
             self._maximization()
+            self._setup_bw()
 
     def eval(self, testpath,wordCase='regular'):
         correct = 0

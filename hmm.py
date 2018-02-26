@@ -263,7 +263,7 @@ class HiddenMarkovModel:
 
     def train(self):
         """Utilize the forward backward algorithm to train the HMM."""
-        for _ in range(3):
+        for _ in range(5):
             with open(self.trainpath, 'r') as infile:
                 for i, line in enumerate(infile):
                     observations = []
@@ -280,6 +280,7 @@ class HiddenMarkovModel:
                     self._expectation(alphas, betas, observations)
 
             self._maximization()
+            self._setup_bw()
 
     def eval(self, testpath,wordCase='regular'):
         correct = 0
