@@ -16,6 +16,7 @@ class HiddenMarkovModel:
             supervised: bool. Whether or not to use the tags in the part of speech
                 data.
         """
+
         self.epsilon = 0.000001
         self.trainpath=train
 
@@ -89,6 +90,20 @@ class HiddenMarkovModel:
         mode_tag = tag_counts.most_common(1)[0][0]
         self.obs_prob[mode_tag]['<UNK>'] = self.epsilon
 
+        if not supervised:
+            self._setup_bw()
+
+    def _setup_bw(self):
+        self.chi = defaultdict(lambda: defaultdict(float))
+        self.total_chi = defaultdict(float)
+        self.seen_observations = set()
+
+        self.gamma = defaultdict(float)
+        self.gamma_by_obs = defaultdict(lambda: defaultdict(float))
+        self.start_gammas = defaultdict(float)
+        self.end_gammas = defaultdict(float)
+
+
     def _forward(self, observations):
         """Forward step of training the HMM.
         Args:
@@ -142,71 +157,61 @@ class HiddenMarkovModel:
 
         return trellis
 
-    def _compute_new_params(self, alphas, betas, observations):
-        """Compute new transition and emission probabilities using the
-        alpha and beta values. Should be used with supervised=False during
-        object initialization.
-        Args:
-            alpha:
-                list of dicts representing the alpha values. alpha[t]['state']
-                is the forward probability for the state at timestep t.
-            beta:
-                list of dicts representing the beta values. beta[t]['state']
-                is the backward probability for the state at timestep t
-        """
+    def _expectation(self, alphas, betas, observations):
         total_sent_prob = alphas[-1]['</s>']
         if total_sent_prob == 0:
             total_sent_prob = self.epsilon
 
         # E-step
-        chi = []
-        i = 0
         for t in range(1,len(observations),1):
-            chi.append(defaultdict(lambda: defaultdict(float)))
             for state in self.states:
                 for next_state in self.states:
-                    total_prob = alphas[-1]['</s>']
-                    if total_prob == 0:
-                        total_prob = self.epsilon
+                    p = alphas[t-1][state] * self.trans_prob[state][next_state] * \
+                        self.obs_prob[next_state][observations[t]] * \
+                        betas[t + 1][next_state] / total_sent_prob
+                    self.total_chi[state] += p
+                    self.chi[state][next_state] += p
 
-                    chi[t-1][state][next_state] = (alphas[t-1][state] * self.trans_prob[state][next_state]
-                        * self.obs_prob[next_state][observations[t]] * betas[t + 1][next_state] / total_sent_prob)
+        for state in self.states:
+            self.total_chi[state] += alphas[-2][state] * self.trans_prob[state]['</s>'] / total_sent_prob
 
-        gamma = []
+
         for t in range(len(observations)):
-            gamma.append(defaultdict(float))
+            self.seen_observations.add(observations[t])
             for state in self.states:
-                gamma[t][state] = alphas[t][state] * betas[t + 1][state] / total_sent_prob
+                p = alphas[t][state] * betas[t + 1][state] / total_sent_prob
 
-        # M-step
-        total_state_count = {}
+                if t == 0:
+                    self.start_gammas[state] += p
+                if t == len(observations) - 1:
+                    self.end_gammas[state] += p
+                self.gamma[state] += p
+                self.gamma_by_obs[state][observations[t]] += p
+
+
+    def _maximization(self):
         for i in self.states:
-            state_count = sum(gamma[t][i] for t in range(len(observations)))
-            if state_count == 0:
-                state_count = self.epsilon
-            total_state_count[i] = state_count
-
-        for i in self.states:
-            chi_per_state = defaultdict(lambda: defaultdict(float))
-            total_chi = alphas[-2][i] * self.trans_prob[i]['</s>'] / total_sent_prob
-
-            for k in self.states:
-                for t in range(len(observations) - 1):
-                    chi_per_state[i][k] += chi[t][i][k]
-                    total_chi += chi[t][i][k]
-            if total_chi == 0:
-                total_chi = self.epsilon
+            total_chi_prob = self.total_chi[i]
+            if total_chi_prob == 0:
+                total_chi_prob = self.epsilon
 
             for j in self.states:
-                self.trans_prob[i][j] = chi_per_state[i][j] / total_chi
+                self.trans_prob[i][j] = self.chi[i][j] / total_chi_prob
 
-            for v_k in observations:
-                self.obs_prob[i][v_k] = sum(gamma[t][i] for t in range(len(observations)) if observations[t] == v_k)
-                self.obs_prob[i][v_k] /= total_state_count[i]
+            for v_k in self.seen_observations:
+                state_prob = self.gamma[i]
+                if state_prob == 0:
+                    state_prob = self.epsilon
+                self.obs_prob[i][v_k] = self.gamma_by_obs[i][v_k] / state_prob
 
         for i in self.states:
-            self.trans_prob['<s>'][i] = gamma[0][i]
-            self.trans_prob[i]['</s>'] = gamma[-1][i] / total_state_count[i]
+            state_prob = self.gamma[i]
+            if state_prob == 0:
+                state_prob = self.epsilon
+
+            self.trans_prob['<s>'][i] = self.start_gammas[i]
+            self.trans_prob[i]['</s>'] = self.end_gammas[i] / state_prob
+
 
     def viterbi(self, words):
         trellis = {}
@@ -258,9 +263,9 @@ class HiddenMarkovModel:
 
     def train(self):
         """Utilize the forward backward algorithm to train the HMM."""
-
         with open(self.trainpath, 'r') as infile:
-            for line in infile:
+            for i, line in enumerate(infile):
+                print(i)
                 observations = []
                 for wordtag in line.rstrip().split(" "):
                     if wordtag == '':
@@ -272,21 +277,15 @@ class HiddenMarkovModel:
 
                 alphas = self._forward(observations)
                 betas = self._backward(observations)
-                self._compute_new_params(alphas, betas, observations)
+                self._expectation(alphas, betas, observations)
 
-        for state in self.states:
-            for state2 in self.states:
-                print('P({}|{}) = {}'.format(state, state2, self.trans_prob[state2][state]))
-        for observation in ['1','2','3']:
-            for state in self.states:
-                print('P({}|{}) = {}'.format(observation, state, self.obs_prob[state][observation]))
+            self._maximization()
 
     def eval(self, testpath,wordCase='regular'):
         correct = 0
         total = 0
         with open(testpath, 'r') as testf:
             for i, line in enumerate(testf):
-                print(i)
                 line = line.strip()
                 terms = line.split()
 
