@@ -9,7 +9,11 @@ class HiddenMarkovModel:
     """
 
     def __init__(
+<<<<<<< HEAD
         self, train="./pos_train.txt", supervised=True):
+=======
+        self, train="./pos_train.txt", supervised=True,wordCase='regular'):
+>>>>>>> origin/master
         """
         Args:
             train: str. The path to the file containing the training data.
@@ -21,6 +25,10 @@ class HiddenMarkovModel:
 
         tag_counts = Counter()
         self.states = set()
+<<<<<<< HEAD
+=======
+        self.vocabulary = set()
+>>>>>>> origin/master
         self.tag_given_tag_counts=dict()
         self.word_given_tag_counts=dict()
         self.vocabulary=set()
@@ -41,9 +49,19 @@ class HiddenMarkovModel:
                     # keep 1/2 as 1\/2
                     parts=wordtag.split("/")
                     tag=parts.pop()
+<<<<<<< HEAD
                     word="/".join(parts)
                     self.states.add(tag)
                     self.vocabulary.add(word)
+=======
+                    
+                    if wordCase=='regular':
+                        word="/".join(parts)
+                    else:
+                        word="/".join([l.lower() for l in parts])
+                        
+                    self.states.add(tag)
+>>>>>>> origin/master
 
                     #
                     # update counters
@@ -79,18 +97,24 @@ class HiddenMarkovModel:
         for tag in self.word_given_tag_counts.keys():
             norm = sum(self.word_given_tag_counts[tag].values())
             for word in self.word_given_tag_counts[tag].keys():
+<<<<<<< HEAD
                 self.obs_prob[tag][word] = self.word_given_tag_counts[tag][word] / norm
 
         mode_tag = tag_counts.most_common(1)[0][0]
         self.obs_prob[mode_tag]['<UNK>'] = self.epsilon
 
+=======
+                self.vocabulary.add(word)
+                self.obs_prob[tag][word] = self.word_given_tag_counts[tag][word] / norm
+        
+        mode_tag = tag_counts.most_common(1)[0][0]
+        self.obs_prob[mode_tag]['<UNK>'] = self.epsilon
+>>>>>>> origin/master
 
     def _forward(self, observations):
         """Forward step of training the HMM.
-
         Args:
             observations: A list of strings.
-
         Returns:
             A list of dict representing the trellis of alpha values
         """
@@ -114,10 +138,8 @@ class HiddenMarkovModel:
 
     def _backward(self, observations):
         """Backward step of training the HMM.
-
         Args:
             observations: A list of strings.
-
         Returns:
             A list of dict representing the trellis of beta values
         """
@@ -146,7 +168,6 @@ class HiddenMarkovModel:
         """Compute new transition and emission probabilities using the
         alpha and beta values. Should be used with supervised=False during
         object initialization.
-
         Args:
             alpha:
                 list of dicts representing the alpha values. alpha[t]['state']
@@ -282,12 +303,12 @@ class HiddenMarkovModel:
             for state in self.states:
                 print('P({}|{}) = {}'.format(observation, state, self.obs_prob[state][observation]))
 
-    def eval(self, testpath):
+    def eval(self, testpath,wordCase='regular'):
         correct = 0
         total = 0
-
         with open(testpath, 'r') as testf:
             for i, line in enumerate(testf):
+                print(i)
                 line = line.strip()
                 terms = line.split()
 
@@ -296,7 +317,11 @@ class HiddenMarkovModel:
                 for term in terms:
                     slash_idx = term.rindex('/')
                     token, tag = term[:slash_idx], term[slash_idx + 1:]
-                    tokens.append(token)
+                    if wordCase=='regular':
+                        tokens.append(token)
+                    else:
+                        tokens.append(token.lower())
+                        
                     tags.append(tag)
 
                 predicted_tags = self.viterbi(tokens)
