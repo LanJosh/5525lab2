@@ -163,22 +163,18 @@ class HiddenMarkovModel:
             total_sent_prob = self.epsilon
 
         # E-step
-        for t in range(1,len(observations),1):
-            for state in self.states:
-                for next_state in self.states:
-                    p = alphas[t-1][state] * self.trans_prob[state][next_state] * \
-                        self.obs_prob[next_state][observations[t]] * \
-                        betas[t + 1][next_state] / total_sent_prob
-                    self.total_chi[state] += p
-                    self.chi[state][next_state] += p
-
-        for state in self.states:
-            self.total_chi[state] += alphas[-2][state] * self.trans_prob[state]['</s>'] / total_sent_prob
-
-
         for t in range(len(observations)):
             self.seen_observations.add(observations[t])
             for state in self.states:
+                if t != 0:
+                    for next_state in self.states:
+                        p = alphas[t-1][state] * self.trans_prob[state][next_state] * \
+                            self.obs_prob[next_state][observations[t]] * \
+                            betas[t + 1][next_state] / total_sent_prob
+                        self.total_chi[state] += p
+                        self.chi[state][next_state] += p
+
+
                 p = alphas[t][state] * betas[t + 1][state] / total_sent_prob
 
                 if t == 0:
@@ -187,6 +183,10 @@ class HiddenMarkovModel:
                     self.end_gammas[state] += p
                 self.gamma[state] += p
                 self.gamma_by_obs[state][observations[t]] += p
+
+
+        for state in self.states:
+            self.total_chi[state] += alphas[-2][state] * self.trans_prob[state]['</s>'] / total_sent_prob
 
 
     def _maximization(self):
@@ -263,21 +263,21 @@ class HiddenMarkovModel:
 
     def train(self):
         """Utilize the forward backward algorithm to train the HMM."""
-        with open(self.trainpath, 'r') as infile:
-            for i, line in enumerate(infile):
-                print(i)
-                observations = []
-                for wordtag in line.rstrip().split(" "):
-                    if wordtag == '':
-                        continue
+        for _ in range(3):
+            with open(self.trainpath, 'r') as infile:
+                for i, line in enumerate(infile):
+                    observations = []
+                    for wordtag in line.rstrip().split(" "):
+                        if wordtag == '':
+                            continue
 
-                    s_idx = wordtag.rindex('/')
-                    word = wordtag[:s_idx]
-                    observations.append(word)
+                        s_idx = wordtag.rindex('/')
+                        word = wordtag[:s_idx]
+                        observations.append(word)
 
-                alphas = self._forward(observations)
-                betas = self._backward(observations)
-                self._expectation(alphas, betas, observations)
+                    alphas = self._forward(observations)
+                    betas = self._backward(observations)
+                    self._expectation(alphas, betas, observations)
 
             self._maximization()
 
